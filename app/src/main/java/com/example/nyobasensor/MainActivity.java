@@ -2,126 +2,137 @@ package com.example.nyobasensor;
 
 import androidx.appcompat.app.AppCompatActivity;
 
-import android.content.pm.PackageManager;
+import android.annotation.SuppressLint;
+import android.content.Context;
 import android.graphics.Color;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
-import android.os.Build;
 import android.os.Bundle;
-import android.view.View;
+import android.os.Environment;
+import android.os.PowerManager;
+import android.os.SystemClock;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.Vector;
 
 public class MainActivity extends AppCompatActivity {
 
     private SensorManager sensorManager;
-
     private Sensor mSensorProximity;
-
     private SensorEventListener proximitySensorListener;
-
     private TextView mTextSensorProximity;
     private TextView mTextSensorLight;
-    Button mSaveBtn;
+    private Button mSaveBtn;
+    private Vector<String> mDataLog;
 
+    private PowerManager powerManager;
+    private PowerManager.WakeLock wakeLock;
+
+    @SuppressLint("InvalidWakeLockTag")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        mTextSensorLight = (TextView) findViewById(R.id.label_light);
-        mTextSensorProximity = (TextView) findViewById(R.id.label_proximity);
-        mSaveBtn = (Button) findViewById(R.id.saveBtn);
+        mTextSensorLight = findViewById(R.id.label_light);
+        mTextSensorProximity = findViewById(R.id.label_proximity);
+        mSaveBtn = findViewById(R.id.saveBtn);
 
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         mSensorProximity = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
 
-        mSaveBtn.setOnClickListener((view) ->{
-            if (!mTextSensorProximity.getText().toString().isEmpty()){
-                File file = new File(MainActivity.this.getFilesDir(), "text");
-                if (!file.exists()){
-                    file.mkdir();
-                }
-                try{
-                    File gpxfile = new File(file, "sample");
-                    FileWriter tulis = new FileWriter(gpxfile);
-                    tulis.append(mTextSensorProximity.getText().toString() + "\t");
-                    tulis.append(mTextSensorLight.getText().toString() + "\t");
-                    tulis.flush();
-                    tulis.close();
+        mDataLog = new Vector<>(100);
+        Thread myThread = new Thread(new WriteThread());
+        myThread.start();
 
-                    Toast.makeText(MainActivity.this, "menyimpan data", Toast.LENGTH_LONG).show();
+        powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        wakeLock = powerManager.newWakeLock(PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK, "WakeLockTag");
 
-
-                }catch (Exception e){
-
-                }
-            }
-
-        });
-        if(mSensorProximity == null){
+        if (mSensorProximity == null) {
             Toast.makeText(this, "Proximity Sensor is not Available", Toast.LENGTH_LONG).show();
             finish();
         }
+
         proximitySensorListener = new SensorEventListener() {
             @Override
             public void onSensorChanged(SensorEvent sensorEvent) {
-                if(sensorEvent.values[0]< mSensorProximity.getMaximumRange()){
+                if (sensorEvent.values[0] < mSensorProximity.getMaximumRange()) {
                     getWindow().getDecorView().setBackgroundColor(Color.RED);
-                    ((TextView)findViewById(R.id.label_light)).setText("Jarak Objek Deket");
-                }else{
+                    mTextSensorLight.setText("Jarak Objek Dekat");
+                } else {
                     getWindow().getDecorView().setBackgroundColor(Color.GREEN);
-                    ((TextView)findViewById(R.id.label_light)).setText("Jarak Objek Jauh");
+                    mTextSensorLight.setText("Jarak Objek Jauh");
                 }
 
-                if (sensorEvent.sensor.getType()==Sensor.TYPE_PROXIMITY){
-                    ((TextView)findViewById(R.id.label_proximity)).setText("Jarak :" + " " + sensorEvent.values[0]);
+                if (sensorEvent.sensor.getType() == Sensor.TYPE_PROXIMITY) {
+                    mTextSensorProximity.setText("Jarak: " + sensorEvent.values[0]);
 
+                    // Save to file immediately
+                    String logText = "Jarak: " + sensorEvent.values[0];
+                    mDataLog.add(logText);
+                    saveDataToFile(logText);
                 }
-
             }
 
             @Override
             public void onAccuracyChanged(Sensor sensor, int i) {
-
+                // Not needed for this example
             }
-
         };
 
         sensorManager.registerListener(proximitySensorListener, mSensorProximity, SensorManager.SENSOR_DELAY_NORMAL);
     }
 
     @Override
-    protected void onPause() {
-        super.onPause();
+    protected void onDestroy() {
+        // Ensure the WakeLock is released when the app is stopped
+        if (wakeLock.isHeld()) {
+            wakeLock.release();
+        }
 
+        // Unregister the sensor listener when the app is stopped
         sensorManager.unregisterListener(proximitySensorListener);
+
+        super.onDestroy();
     }
-//agar file terbaca
-    private String readFIle() {
-        File fileEvents = new File(MainActivity.this.getFilesDir() + "/text/sample");
-        StringBuilder text = new StringBuilder();
+
+    private void saveDataToFile(String text) {
         try {
-            BufferedReader br = new BufferedReader(new FileReader(fileEvents));
-            String line;
-            while ((line = br.readLine()) != null) {
-                text.append(line);
-                text.append(' ');
+            File logFile = new File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Proximity.txt");
+
+            if (!logFile.exists()) {
+                logFile.createNewFile();
             }
-            br.close();
-        } catch (IOException e) { }
-        String result = text.toString();
-        return result;
+
+            BufferedWriter buf = new BufferedWriter(new FileWriter(logFile, true));
+            buf.append(text);
+            buf.newLine();
+            buf.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
-
+    class WriteThread implements Runnable {
+        @Override
+        public void run() {
+            while (true) {
+                if (mDataLog.size() > 0) {
+                    SystemClock.sleep(10);
+                    saveDataToFile(mDataLog.firstElement());
+                    mDataLog.remove(0);
+                } else {
+                    SystemClock.sleep(100);
+                }
+            }
+        }
+    }
 }
