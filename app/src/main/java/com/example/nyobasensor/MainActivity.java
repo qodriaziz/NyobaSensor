@@ -75,10 +75,10 @@ public class MainActivity extends AppCompatActivity {
                 if (sensorEvent.sensor.getType() == Sensor.TYPE_PROXIMITY) {
                     mTextSensorProximity.setText("Jarak: " + sensorEvent.values[0]);
 
-                    // Save to file immediately
-                    String logText = "Jarak: " + sensorEvent.values[0];
+                    // Save to CSV file immediately
+                    String logText = sensorEvent.values[0] + "";
                     mDataLog.add(logText);
-                    saveDataToFile(logText);
+                    saveDataToCSV(logText);
                 }
             }
 
@@ -104,16 +104,22 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
     }
 
-    private void saveDataToFile(String text) {
+    private void saveDataToCSV(String text) {
         try {
-            File logFile = new File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Proximity.txt");
+            File csvFile = new File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Proximity.csv");
 
-            if (!logFile.exists()) {
-                logFile.createNewFile();
+            if (!csvFile.exists()) {
+                csvFile.createNewFile();
+                // Jika file baru dibuat, tambahkan header (opsional)
+                BufferedWriter headerWriter = new BufferedWriter(new FileWriter(csvFile, true));
+                headerWriter.write("Timestamp,ProximityValue"); // Sesuaikan header sesuai kebutuhan
+                headerWriter.newLine();
+                headerWriter.close();
             }
 
-            BufferedWriter buf = new BufferedWriter(new FileWriter(logFile, true));
-            buf.append(text);
+            // Tulis data ke file CSV
+            BufferedWriter buf = new BufferedWriter(new FileWriter(csvFile, true));
+            buf.append(System.currentTimeMillis() + "," + text); // Gunakan timestamp sebagai kolom pertama
             buf.newLine();
             buf.close();
         } catch (IOException e) {
@@ -127,7 +133,7 @@ public class MainActivity extends AppCompatActivity {
             while (true) {
                 if (mDataLog.size() > 0) {
                     SystemClock.sleep(10);
-                    saveDataToFile(mDataLog.firstElement());
+                    saveDataToCSV(mDataLog.firstElement());
                     mDataLog.remove(0);
                 } else {
                     SystemClock.sleep(100);
